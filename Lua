@@ -1,0 +1,237 @@
+-- [[ VOLLEYBALL SCRIPT: PERFECT FRONT LINE (NO HEAD PENETRATION) ]] --
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+
+-- ค่าปรับแต่งตำแหน่งเส้นแนวนอนหน้าตัว (ขยับยื่นไปข้างหน้าไม่ให้ทะลุหัว)
+local SETTINGS = {
+    DistanceInFront = 8,     -- ขยับยื่นไปข้างหน้าเพิ่มขึ้น (เพื่อไม่ให้เส้นทะลุเข้าหัว)
+    HeightOffset = 1.2,      -- ความสูงระดับสายตา/หน้าอกพอดี
+    LineLength = 14,         -- ความยาวเส้นแนวนอน
+    LineThickness = 0.2,     -- ความหนา
+    LineDepth = 0.2,         -- ความลึก
+}
+
+-- ระดับขนาดฮิตบ็อกซ์บอล 6 ระดับ
+local HitboxSizes = {
+    {Name = "Normal (1x)", Scale = 1},
+    {Name = "Medium (1.8x)", Scale = 1.8},
+    {Name = "Big (2.5x)", Scale = 2.5},
+    {Name = "Very Big (3.5x)", Scale = 3.5},
+    {Name = "Giant (5x)", Scale = 5},
+    {Name = "Mega (7x)", Scale = 7}
+}
+local currentSizeIndex = 1
+
+-- // 1. สร้าง UI ปุ่มกดอย่างปลอดภัยใน PlayerGui
+local playerGui = LocalPlayer:WaitForChild("PlayerGui")
+if playerGui:FindFirstChild("VolleyballHitboxGui") then
+    playerGui.VolleyballHitboxGui:Destroy()
+end
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "VolleyballHitboxGui"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = playerGui
+
+local sizeButton = Instance.new("TextButton")
+sizeButton.Name = "HitboxSizeButton"
+sizeButton.Size = UDim2.new(0, 130, 0, 40)
+sizeButton.Position = UDim2.new(0.02, 0, 0.25, 0)
+sizeButton.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+sizeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+sizeButton.TextSize = 13
+sizeButton.Font = Enum.Font.GothamBold
+sizeButton.Text = "Ball: Normal (1x)"
+sizeButton.Parent = screenGui
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 8)
+corner.Parent = sizeButton
+
+
+-- // 2. ฟังก์ชันจัดการวงกลมจุดตกบนพื้น
+local landingIndicator
+local function GetLandingIndicator()
+    if not landingIndicator or not landingIndicator.Parent then
+        landingIndicator = Instance.new("Part")
+        landingIndicator.Name = "BallLandingIndicator"
+        landingIndicator.Shape = Enum.PartType.Cylinder
+        landingIndicator.Size = Vector3.new(0.05, 7, 7)
+        landingIndicator.Orientation = Vector3.new(0, 0, 90)
+        landingIndicator.Anchored = true
+        landingIndicator.CanCollide = false
+        landingIndicator.CastShadow = false
+        landingIndicator.Material = Enum.Material.Neon
+        landingIndicator.Color = Color3.fromRGB(255, 50, 50) -- สีแดง
+        landingIndicator.Transparency = 1
+        landingIndicator.Parent = Workspace
+    end
+    return landingIndicator
+end
+
+
+-- // 3. ฟังก์ชันสร้างเส้นแนวนอนขวางหน้าตัวละคร (ขยับพุ่งไปข้างหน้าไม่ให้โดนหัว)
+local function CreateAlignmentLine(character)
+    if not character then return end
+    if character:FindFirstChild("VolleyballAlignLine") then
+        character.VolleyballAlignLine:Destroy()
+    end
+
+    local humanoidRootPart = character:WaitForChild("HumanoidRootPart", 5)
+    if not humanoidRootPart then return end
+
+    local linePart = Instance.new("Part")
+    linePart.Name = "VolleyballAlignLine"
+    linePart.Size = Vector3.new(SETTINGS.LineDepth, SETTINGS.LineThickness, SETTINGS.LineLength)
+    linePart.Color = Color3.fromRGB(120, 255, 120) -- สีเขียวอ่อนแบบไม่เรืองแสง
+    linePart.Material = Enum.Material.SmoothPlastic 
+    linePart.Anchored = false
+    linePart.CanCollide = false
+    linePart.CastShadow = false
+    linePart.Transparency = 0
+    linePart.Parent = character
+
+    local connection
+    connection = RunService.RenderStepped:Connect(function()
+        if not character or not character.Parent or not humanoidRootPart or not humanoidRootPart.Parent then
+            if connection then connection:Disconnect() end
+            return
+        end
+        -- ล็อกตำแหน่งด้านหน้าตัวละครแบบเว้นระยะ
+        linePart.CFrame = humanoidRootPart.CFrame * CFrame.new(0, SETTINGS.HeightOffset, -SETTINGS.DistanceInFront)
+    end)
+end
+
+
+-- // 4. ฟังก์ชันค้นหาลูกบอลในแมพ
+local function GetBall()
+    for _, obj in ipairs(Workspace:GetChildren()) do
+        local nameLower = obj.Name:lower()
+        if nameLower:find("ball") or nameLower:find("volleyball") then
+            if obj:IsA("BasePart") then 
+                return obj
+            elseif obj:IsA("Model") then 
+                return obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart") 
+            end
+        end
+    end
+    return nil
+end
+
+
+-- // 5. ระบบคำนวณจุดตกบนพื้น
+RunService.RenderStepped:Connect(function()
+    pcall(function()
+        local indicator = GetLandingIndicator()
+        local ball = GetBall()
+
+        if ball and ball.Parent then
+            local pos = ball.Position
+
+            local raycastParams = RaycastParams.new()
+            raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+            raycastParams.IgnoreWater = true
+            
+            local excludeList = {ball, indicator}
+            if ball.Parent:IsA("Model") then
+                table.insert(excludeList, ball.Parent)
+            end
+            raycastParams.FilterDescendantsInstances = excludeList
+
+            local rayResult = Workspace:Raycast(pos, Vector3.new(0, -600, 0), raycastParams)
+            if rayResult then
+                indicator.Position = Vector3.new(pos.X, rayResult.Position.Y + 0.1, pos.Z)
+                indicator.Transparency = 0.3
+                return
+            end
+        end
+        
+        indicator.Transparency = 1
+    end)
+end)
+
+
+-- // 6. ฟังก์ชันจัดการฮิตบ็อกซ์บอล 6 ระดับ + Highlight
+local function SetupBall(obj)
+    local nameLower = obj.Name:lower()
+    if nameLower:find("ball") or nameLower:find("volleyball") then
+        local targetPart = nil
+        if obj:IsA("BasePart") then
+            targetPart = obj
+        elseif obj:IsA("Model") then
+            targetPart = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
+        end
+
+        if targetPart then
+            local originalSizeAttr = obj:FindFirstChild("TrueOriginalSize")
+            if not originalSizeAttr then
+                originalSizeAttr = Instance.new("Vector3Value")
+                originalSizeAttr.Name = "TrueOriginalSize"
+                originalSizeAttr.Value = targetPart.Size
+                originalSizeAttr.Parent = obj
+            end
+
+            local scaleMultiplier = HitboxSizes[currentSizeIndex].Scale
+            targetPart.Size = originalSizeAttr.Value * scaleMultiplier
+        end
+
+        if not obj:FindFirstChild("BallHighlight") then
+            local highlight = Instance.new("Highlight")
+            highlight.Name = "BallHighlight"
+            highlight.FillColor = Color3.fromRGB(255, 255, 0)
+            highlight.FillTransparency = 0.3
+            highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+            highlight.OutlineTransparency = 0
+            highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+            highlight.Parent = obj
+        end
+    end
+end
+
+local function UpdateAllBalls()
+    for _, obj in ipairs(Workspace:GetChildren()) do
+        pcall(function() SetupBall(obj) end)
+    end
+end
+
+-- สลับขนาดฮิตบ็อกซ์เมื่อกดปุ่ม
+sizeButton.MouseButton1Click:Connect(function()
+    currentSizeIndex = currentSizeIndex + 1
+    if currentSizeIndex > #HitboxSizes then
+        currentSizeIndex = 1
+    end
+    local currentSetting = HitboxSizes[currentSizeIndex]
+    sizeButton.Text = "Ball: " .. currentSetting.Name
+    UpdateAllBalls()
+end)
+
+-- ค้นหาบอลตั้งแต่เริ่มเกมและบอลเกิดใหม่
+for _, obj in ipairs(Workspace:GetChildren()) do
+    pcall(function() SetupBall(obj) end)
+end
+
+Workspace.ChildAdded:Connect(function(obj)
+    task.wait(0.1)
+    pcall(function() SetupBall(obj) end)
+end)
+
+-- ติดตามตัวละครผู้เล่นทุกคน
+local function MonitorPlayer(player)
+    player.CharacterAdded:Connect(function(character)
+        task.wait(0.5)
+        CreateAlignmentLine(character)
+    end)
+    if player.Character then
+        CreateAlignmentLine(player.Character)
+    end
+end
+
+for _, player in ipairs(Players:GetPlayers()) do
+    MonitorPlayer(player)
+end
+
+Players.PlayerAdded:Connect(MonitorPlayer)
+
+print("Line Offset Fixed - Front Positioning Ready!")
